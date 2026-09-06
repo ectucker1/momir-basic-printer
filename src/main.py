@@ -168,7 +168,8 @@ class MomirApp:
         # Scryfall
         try:
             from scryfall import Scryfall
-            self.scryfall = Scryfall(scryfall_config, filesystem_config)
+            self.scryfall = Scryfall(
+                scryfall_config, filesystem_config, printer_config)
             logger.info("Scryfall service initialized.")
         except Exception as exc:
             self.scryfall = None

@@ -170,7 +170,7 @@ All configuration variables are stored in [src/config.ini](src/config.ini). Upda
 | `LOGGING`    | `log_date_format`               | `string`  | Format string for timestamps in log messages                                           |
 | `PRINTER`    | `paper_width_mm`                | `integer` | Physical width of thermal paper in millimeters                                         |
 | `PRINTER`    | `paper_width_chars`             | `integer` | Maximum number of characters per line for text wrapping                                |
-| `PRINTER`    | `card_art_enabled`              | `boolean` | Whether to print card artwork images on receipts                                       |
+| `PRINTER`    | `card_art_enabled`              | `boolean` | Whether to print card artwork images on receipts (when `False`, art is not downloaded during refresh) |
 | `PRINTER`    | `qr_code_enabled`               | `boolean` | Whether to print QR codes linking to Scryfall card details                             |
 | `PRINTER`    | `qr_code_size`                  | `integer` | Size of QR code in printer units (larger = bigger QR code)                             |
 | `PRINTER`    | `dpi`                           | `integer` | Printer resolution in dots per inch for image rendering                                |

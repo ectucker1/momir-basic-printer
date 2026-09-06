@@ -43,12 +43,14 @@ class Scryfall:
     PAPER_FORMAT = "paper"
     CREATURE_TYPE = "creature"
 
-    def __init__(self, scryfall_config, filesystem_config) -> None:
+    def __init__(self, scryfall_config, filesystem_config, printer_config=None) -> None:
         """Initialize Scryfall client with configuration.
 
         Args:
             scryfall_config: Configuration section for Scryfall API settings
             filesystem_config: Configuration section for filesystem paths
+            printer_config: Optional configuration section for printer settings,
+                used to determine whether card art is needed at all
         """
         # API configuration
         self.base_url: str = scryfall_config.get('base_url')
@@ -64,6 +66,12 @@ class Scryfall:
             'request_delay_seconds')
         self.max_retries: int = scryfall_config.getint('max_retries')
         self.art_width_px: int = scryfall_config.getint('art_width_px')
+
+        # Card art is only downloaded and stored when the printer will use it
+        self.card_art_enabled: bool = (
+            printer_config.getboolean('card_art_enabled', fallback=True)
+            if printer_config is not None else True
+        )
 
         # Filter configuration
         self.excluded_sets: List[str] = [
@@ -84,7 +92,8 @@ class Scryfall:
 
         # Ensure runtime directories exist so app can boot on a fresh install.
         self.cards_path.mkdir(parents=True, exist_ok=True, mode=self.access_rights)
-        self.art_path.mkdir(parents=True, exist_ok=True, mode=self.access_rights)
+        if self.card_art_enabled:
+            self.art_path.mkdir(parents=True, exist_ok=True, mode=self.access_rights)
 
         # Validate critical configuration
         self._validate_config()
@@ -106,7 +115,7 @@ class Scryfall:
             raise ValueError(
                 f"art_width_px must be positive, got {self.art_width_px}")
 
-        if not self.default_card_art_path.exists():
+        if self.card_art_enabled and not self.default_card_art_path.exists():
             logger.warning(
                 f"Default card art not found at {self.default_card_art_path}. "
                 "Fallback art will be generated when needed."
@@ -502,9 +511,13 @@ class Scryfall:
             cmc: Converted mana cost
 
         Returns:
-            True if both card JSON and art exist locally
+            True if the card JSON exists locally, and its art too when card art
+            is enabled
         """
-        return self._get_card_path(card_id, cmc).exists() and self._get_art_path(card_id).exists()
+        if not self._get_card_path(card_id, cmc).exists():
+            return False
+
+        return not self.card_art_enabled or self._get_art_path(card_id).exists()
 
     def needs_refresh(self) -> bool:
         """Check if a refresh is needed by comparing metadata timestamps.
@@ -585,7 +598,7 @@ class Scryfall:
         This method:
         1. Determines the card's CMC and creates the directory if needed
         2. Saves the card JSON data to the appropriate CMC folder
-        3. Downloads and saves the card artwork if available
+        3. Downloads and saves the card artwork if available and enabled
 
         Args:
             card: Card data dictionary from Scryfall (must contain 'id' and 'cmc')
@@ -605,7 +618,10 @@ class Scryfall:
         card_path = self._get_card_path(card_id, cmc)
         self.save_card(card_path, card)
 
-        # Save card art if available
+        # Save card art if available and enabled
+        if not self.card_art_enabled:
+            return
+
         card_art_uri = self._get_card_art_uri(card)
         if card_art_uri:
             art_path = self._get_art_path(card_id)
@@ -724,7 +740,8 @@ class Scryfall:
 
         # Ensure directories exist
         self.create_directory(self.cards_path)
-        self.create_directory(self.art_path)
+        if self.card_art_enabled:
+            self.create_directory(self.art_path)
 
         # Clear existing data if doing full refresh
         if force_full_refresh:
@@ -733,7 +750,8 @@ class Scryfall:
             self.delete_directory(self.cards_path)
             self.create_directory(self.cards_path)
             self.delete_directory(self.art_path)
-            self.create_directory(self.art_path)
+            if self.card_art_enabled:
+                self.create_directory(self.art_path)
         else:
             logger.info("Performing incremental update...")
 
