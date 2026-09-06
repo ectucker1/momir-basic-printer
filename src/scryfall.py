@@ -10,7 +10,6 @@ from time import sleep
 from typing import Any, Dict, List, Optional, Set
 
 import gzip
-import ijson
 import requests
 from PIL import Image
 
@@ -37,7 +36,7 @@ class Scryfall:
     MONOCHROME_MODE = "1"
     HTTP_OK = 200
     REQUEST_TIMEOUT = 30
-    JSON_STREAM_PATH = "item"  # Path for ijson to parse array items
+    BULK_DOWNLOAD_URI_FIELD = "jsonl_download_uri"  # Scryfall bulk data download field
 
     # Momir Basic validation constants
     PAPER_FORMAT = "paper"
@@ -558,7 +557,8 @@ class Scryfall:
 
         metadata = {
             'updated_at': bulk_metadata.get('updated_at') if bulk_metadata else None,
-            'download_uri': bulk_metadata.get('download_uri') if bulk_metadata else None,
+            'download_uri': (bulk_metadata.get(self.BULK_DOWNLOAD_URI_FIELD)
+                             if bulk_metadata else None),
             'total_card_count': self.get_total_card_count(),
             'cmc_card_count': {str(cmc): self.get_card_count_by_cmc(cmc)
                                for cmc in self.get_valid_cmcs()}
@@ -689,15 +689,18 @@ class Scryfall:
         logger.info("Streaming bulk data from Scryfall...")
 
         try:
-            with requests.get(bulk_metadata['download_uri'], headers=headers, stream=True,
-                              timeout=self.REQUEST_TIMEOUT) as response:
+            with requests.get(bulk_metadata[self.BULK_DOWNLOAD_URI_FIELD], headers=headers,
+                              stream=True, timeout=self.REQUEST_TIMEOUT) as response:
                 response.raise_for_status()
 
+                # Bulk data is JSON Lines: one card object per line
                 with gzip.GzipFile(fileobj=response.raw) as unzipped_stream:
-                    parser = ijson.items(
-                        unzipped_stream, self.JSON_STREAM_PATH, use_float=True)
+                    for line in unzipped_stream:
+                        line = line.strip()
+                        if not line:
+                            continue
 
-                    for card in parser:
+                        card = json.loads(line)
                         stats['total_processed'] += 1
 
                         if self.is_valid_momir_basic_card(card):
