@@ -150,11 +150,11 @@ class Printer:
         cleaned = text
         for old_char, new_char in self._text_replacements.items():
             cleaned = cleaned.replace(old_char, new_char)
-        # Encode to CP437 (standard ASCII/IBM code page) so that python-escpos's
-        # MagicEncode never needs to switch to a non-Latin codepage (e.g. GBK).
-        # Characters outside CP437 are replaced with '?' rather than triggering
-        # a codepage switch that would corrupt the entire subsequent print stream.
-        cleaned = cleaned.encode('cp437', errors='replace').decode('cp437')
+        # Encode to ASCII so no byte >= 0x80 is ever sent. CP437 is not safe
+        # here: the printer's Chinese character mode treats any high byte as the
+        # lead byte of a two-byte GBK sequence, so an accented character would
+        # swallow the character after it. Unsupported characters become '?'.
+        cleaned = cleaned.encode('ascii', errors='replace').decode('ascii')
         return cleaned
 
     def _is_dtr_busy(self) -> bool:
@@ -290,7 +290,7 @@ class Printer:
         """
         # Extract and clean card data
         card_name = self.clean_text(card.get("name") or "Unknown Card")
-        card_mana_cost = card.get("mana_cost") or ""
+        card_mana_cost = self.clean_text(card.get("mana_cost") or "")
         card_scryfall_uri = card.get("scryfall_uri") or ""
         card_id = card.get("id")
         card_art_path: Optional[Path] = (
@@ -304,6 +304,11 @@ class Printer:
 
         try:
             printer = self._get_printer_connection()
+
+            # Cancel the printer's Chinese character mode (FS .). Chinese
+            # firmware enables it at power-on, and in that mode bytes >= 0x80 are
+            # read as GBK lead bytes, printing Chinese glyphs instead of text.
+            printer._raw(b'\x1c\x2e')
 
             # Prefer a Latin/ASCII codepage before sending text. Different
             # escpos profiles expose different aliases, so try common names and
