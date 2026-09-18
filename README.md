@@ -13,6 +13,7 @@ Momir Basic Printer (MBP) is a set of Python scripts designed to run headless on
   - [Photos](#photos)
 - [Installation](#installation)
 - [Service Management](#service-management)
+- [Troubleshooting](#troubleshooting)
 - [Configuration](#configuration)
 - [Disclaimer](#disclaimer)
 
@@ -90,6 +91,29 @@ chmod +x setup.sh
 > [!TIP]
 > If you are running a minimal setup and explicitly require the service to run as root, you can bypass the safety check by running: `sudo ./setup.sh --allow-root`
 
+4. Check which serial port the printer is wired to. On models with onboard Bluetooth (Pi 3, Pi 4, Pi Zero 2 W), `/dev/serial0` defaults to the mini-UART, which is not reliable enough for the printer.
+
+```shell
+ls -l /dev/serial0
+```
+
+If this points at `ttyS0`, add the following line to `/boot/firmware/config.txt` to hand the hardware UART (PL011) to the GPIO header instead, then disable the Bluetooth modem service and reboot.
+
+```shell
+# In /boot/firmware/config.txt, under [all]:
+dtoverlay=disable-bt
+```
+
+```shell
+sudo systemctl disable --now hciuart
+sudo reboot
+```
+
+After rebooting, `ls -l /dev/serial0` should point at `ttyAMA0`. No change to `serial_port` in [src/config.ini](src/config.ini) is needed, as it follows the symlink.
+
+> [!IMPORTANT]
+> The mini-UART derives its baud rate from the VPU core clock, so its actual bit rate drifts whenever the core clock changes, and the printer receives corrupted bytes. `enable_uart=1` (set by `setup.sh`) is meant to pin the core clock at 250 MHz to prevent this, but other settings such as `arm_boost=1` and `dtoverlay=vc4-kms-v3d` also influence clock management. The PL011 runs off a fixed 48 MHz clock and is unaffected. This costs you onboard Bluetooth; if you need it, pin `core_freq=250` and `core_freq_min=250` instead and stay on the mini-UART.
+
 ## Service Management
 
 View live logs and print statements:
@@ -115,6 +139,34 @@ Stop the service:
 ```shell
 sudo systemctl stop momir-basic-printer.service
 ```
+
+## Troubleshooting
+
+### Prints come out as garbled or Chinese characters
+
+This is a serial link problem, not a text encoding problem. Most low-cost thermal printers ship with Chinese character mode enabled, so any corrupted byte above `0x7F` is rendered as a CJK glyph.
+
+First, confirm the printer itself is healthy and check what baud rate it expects. Power the printer off, hold the feed button, and power it back on while holding. It prints a self-test page listing its configured baud rate and character set. Make sure that baud rate matches `serial_baud_rate` in [src/config.ini](src/config.ini).
+
+If the self-test page is clean but prints from the Pi are not, test the serial link directly, with the service stopped:
+
+```shell
+sudo systemctl stop momir-basic-printer.service
+exec 3<>/dev/serial0
+stty -F /dev/serial0 9600 cs8 -cstopb -parenb -crtscts raw -echo
+printf '\033@HELLO WORLD 12345\n\n\n' >&3
+exec 3>&-
+```
+
+If that prints garbage, the problem is below the application. Check that you are not on the mini-UART (see step 4 of [Installation](#installation)), and that no serial console is attached to the port:
+
+```shell
+cat /boot/firmware/cmdline.txt          # must not contain console=serial0 or console=ttyS0
+systemctl status serial-getty@ttyS0     # should be inactive and disabled
+```
+
+> [!NOTE]
+> The `stty` settings only stick while the port is held open, which is why the test above opens file descriptor 3 first. Running `stty` and `printf` as separate commands can silently revert the port to its previous settings.
 
 ## Configuration
 
