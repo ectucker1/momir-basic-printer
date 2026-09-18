@@ -37,6 +37,7 @@ class Scryfall:
     HTTP_OK = 200
     REQUEST_TIMEOUT = 30
     BULK_DOWNLOAD_URI_FIELD = "jsonl_download_uri"  # Scryfall bulk data download field
+    IMAGE_ACCEPT_HEADER = "image/*"  # Accept header for image CDN requests
 
     # Momir Basic validation constants
     PAPER_FORMAT = "paper"
@@ -355,6 +356,21 @@ class Scryfall:
             headers['Accept-Encoding'] = self.header_accept_encoding
         return headers
 
+    def _get_image_request_headers(self) -> Dict[str, str]:
+        """Build request headers for card art downloads from Scryfall's image CDN.
+
+        The image CDN rejects any request carrying a default HTTP library
+        User-Agent with HTTP 400 ("generic_user_agent"), so art downloads must
+        identify the application just like API calls do.
+
+        Returns:
+            Dictionary of HTTP headers
+        """
+        return {
+            'Accept': self.IMAGE_ACCEPT_HEADER,
+            'User-Agent': self.header_user_agent
+        }
+
     # Path Resolution Helpers
 
     def _get_card_path(self, card_id: str, cmc: int) -> Path:
@@ -465,7 +481,8 @@ class Scryfall:
         for attempt in range(self.max_retries + 1):
             try:
                 response = requests.get(
-                    card_art_uri, timeout=self.REQUEST_TIMEOUT)
+                    card_art_uri, headers=self._get_image_request_headers(),
+                    timeout=self.REQUEST_TIMEOUT)
 
                 if response.status_code == self.HTTP_OK:
                     img = self._process_image(response.content)
